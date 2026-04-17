@@ -1,13 +1,16 @@
 package com.jiqiu.configapp;
 
 import android.content.BroadcastReceiver;
-import android.content.Context;
 import android.content.Intent;
-import android.os.Binder;
+import android.content.BroadcastReceiver.PendingResult;
+import android.content.Context;
+import android.os.Build;
 import android.os.Process;
 import android.util.Log;
 
 import com.topjohnwu.superuser.Shell;
+
+import java.lang.reflect.Method;
 
 /**
  * BroadcastReceiver to apply configurations pushed from ADB
@@ -17,25 +20,34 @@ import com.topjohnwu.superuser.Shell;
  */
 public class ConfigApplyReceiver extends BroadcastReceiver {
     private static final String TAG = "ConfigApplyReceiver";
+    public static final String ACTION_APPLY_CONFIG = "com.jiqiu.configapp.APPLY_CONFIG";
     
     // UID constants
     private static final int SHELL_UID = 2000;  // ADB shell user
     private static final int ROOT_UID = 0;       // Root user
+    private static final int INVALID_UID = Process.INVALID_UID;
     
     @Override
     public void onReceive(Context context, Intent intent) {
-        // 权限检查：只允许 shell 或 root 用户发送广播
-        int callingUid = Binder.getCallingUid();
-        if (callingUid != SHELL_UID && callingUid != ROOT_UID) {
-            Log.w(TAG, "Unauthorized broadcast attempt from UID: " + callingUid);
+        final int sentFromUid = resolveSentFromUidCompat();
+        final String sentFromPackage = resolveSentFromPackageCompat();
+        final String action = intent != null ? intent.getAction() : null;
+
+        Log.i(TAG, "onReceive entered, action=" + action
+                + ", sentFromUid=" + sentFromUid
+                + ", sentFromPackage=" + sentFromPackage);
+
+        // Android 14+ 可直接读取广播真实发送者 UID
+        if (sentFromUid != INVALID_UID && sentFromUid != SHELL_UID && sentFromUid != ROOT_UID) {
+            Log.w(TAG, "Unauthorized broadcast attempt from UID: " + sentFromUid);
             Log.w(TAG, "Only shell (2000) or root (0) can send this broadcast");
             return;
         }
-        
-        Log.i(TAG, "Received config apply broadcast from authorized UID: " + callingUid);
-        
-        String action = intent.getAction();
-        if (!"com.jiqiu.configapp.APPLY_CONFIG".equals(action)) {
+        if (sentFromUid == INVALID_UID) {
+            Log.i(TAG, "Sender UID unavailable on this Android version, relying on receiver permission gate");
+        }
+
+        if (!ACTION_APPLY_CONFIG.equals(action)) {
             Log.w(TAG, "Unknown action: " + action);
             return;
         }
@@ -55,11 +67,14 @@ public class ConfigApplyReceiver extends BroadcastReceiver {
             Log.e(TAG, "Package name is required");
             return;
         }
-        
+
+        final PendingResult pendingResult = goAsync();
+        final Context appContext = context.getApplicationContext();
+
         // 在后台线程处理，避免阻塞主线程
         new Thread(() -> {
             try {
-                ConfigManager configManager = new ConfigManager(context);
+                ConfigManager configManager = new ConfigManager(appContext);
                 
                 // 确保目录存在
                 configManager.ensureModuleDirectories();
@@ -79,7 +94,7 @@ public class ConfigApplyReceiver extends BroadcastReceiver {
                             // 重新加载配置
                             configManager.reloadConfig();
                         } else {
-                            Log.e(TAG, "Failed to copy main config: " + String.join("\n", copyResult.getErr()));
+                            logShellFailure("copy main config", copyResult);
                         }
                     } else {
                         Log.w(TAG, "Main config file not found at: " + tmpConfigPath);
@@ -117,7 +132,7 @@ public class ConfigApplyReceiver extends BroadcastReceiver {
                                 Shell.cmd("chcon u:object_r:app_data_file:s0 \"" + targetPath + "\"").exec();
                             }
                         } else {
-                            Log.e(TAG, "Failed to copy gadget config: " + String.join("\n", copyResult.getErr()));
+                            logShellFailure("copy gadget config", copyResult);
                         }
                     } else {
                         Log.w(TAG, "Gadget config file not found at: " + tmpGadgetConfigPath);
@@ -145,7 +160,51 @@ public class ConfigApplyReceiver extends BroadcastReceiver {
                 
             } catch (Exception e) {
                 Log.e(TAG, "Error applying config", e);
+            } finally {
+                pendingResult.finish();
             }
         }).start();
+    }
+
+    private static void logShellFailure(String step, Shell.Result result) {
+        Log.e(TAG, step + " failed, code=" + result.getCode());
+        if (!result.getOut().isEmpty()) {
+            Log.e(TAG, step + " stdout: " + String.join("\n", result.getOut()));
+        }
+        if (!result.getErr().isEmpty()) {
+            Log.e(TAG, step + " stderr: " + String.join("\n", result.getErr()));
+        }
+    }
+
+    private int resolveSentFromUidCompat() {
+        if (Build.VERSION.SDK_INT < 34) {
+            return INVALID_UID;
+        }
+        try {
+            Method method = BroadcastReceiver.class.getMethod("getSentFromUid");
+            Object value = method.invoke(this);
+            if (value instanceof Integer) {
+                return (Integer) value;
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Failed to resolve sentFromUid, fallback to permission gate", e);
+        }
+        return INVALID_UID;
+    }
+
+    private String resolveSentFromPackageCompat() {
+        if (Build.VERSION.SDK_INT < 34) {
+            return null;
+        }
+        try {
+            Method method = BroadcastReceiver.class.getMethod("getSentFromPackage");
+            Object value = method.invoke(this);
+            if (value instanceof String) {
+                return (String) value;
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Failed to resolve sentFromPackage", e);
+        }
+        return null;
     }
 }

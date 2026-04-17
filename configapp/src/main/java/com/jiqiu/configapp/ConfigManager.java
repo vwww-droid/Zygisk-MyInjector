@@ -95,7 +95,7 @@ public class ConfigManager {
      */
     public void reloadConfig() {
         loadConfig();
-        Log.i(TAG, "Configuration reloaded");
+        Log.i(TAG, "Configuration reloaded from " + CONFIG_FILE);
     }
     
     public void saveConfig() {
@@ -399,6 +399,7 @@ public class ConfigManager {
     
     private void deployGadgetConfigFile(String packageName, GadgetConfig gadgetConfig) {
         try {
+            Log.i(TAG, "deployGadgetConfigFile start, package=" + packageName + ", gadget=" + gadgetConfig.gadgetName);
             // Create gadget config JSON
             String configJson;
             if ("script".equals(gadgetConfig.mode)) {
@@ -458,6 +459,7 @@ public class ConfigManager {
     
     // Copy SO files directly to app's data directory
     private void deploySoFilesToApp(String packageName) {
+        Log.i(TAG, "deploySoFilesToApp start, package=" + packageName);
         AppConfig appConfig = config.perAppConfig.get(packageName);
         if (appConfig == null || appConfig.soFiles.isEmpty()) {
             Log.w(TAG, "No SO files to deploy for: " + packageName);
@@ -670,6 +672,7 @@ public class ConfigManager {
             Log.e(TAG, "Package name cannot be null or empty");
             return;
         }
+        Log.i(TAG, "deployForPackage invoked for " + packageName);
         deploySoFilesToApp(packageName);
     }
     

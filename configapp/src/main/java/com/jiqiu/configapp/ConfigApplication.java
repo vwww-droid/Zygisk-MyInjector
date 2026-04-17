@@ -5,6 +5,7 @@ import android.app.Application;
 import android.content.Context;
 import android.content.IntentFilter;
 import android.os.Build;
+import android.os.Handler;
 import android.util.Log;
 
 /**
@@ -13,7 +14,8 @@ import android.util.Log;
  */
 public class ConfigApplication extends Application {
     private static final String TAG = "ConfigApplication";
-    private static final String ACTION_APPLY_CONFIG = "com.jiqiu.configapp.APPLY_CONFIG";
+    private static final String ACTION_APPLY_CONFIG = ConfigApplyReceiver.ACTION_APPLY_CONFIG;
+    private static final String BROADCAST_PERMISSION = "android.permission.DUMP";
     
     private ConfigApplyReceiver configReceiver;
     
@@ -27,14 +29,14 @@ public class ConfigApplication extends Application {
         configReceiver = new ConfigApplyReceiver();
         IntentFilter filter = new IntentFilter(ACTION_APPLY_CONFIG);
         
-        // 使用 RECEIVER_NOT_EXPORTED 标志，明确表示不导出
+        // 允许 shell/root 通过广播命中动态 receiver, 具体访问控制在 receiver 内部再做 UID 校验
         if (Build.VERSION.SDK_INT >= 33) {
-            registerReceiver(configReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
+            registerReceiver(configReceiver, filter, BROADCAST_PERMISSION, (Handler) null, Context.RECEIVER_EXPORTED);
         } else {
-            registerReceiver(configReceiver, filter);
+            registerReceiver(configReceiver, filter, BROADCAST_PERMISSION, null);
         }
-        Log.d(TAG, "Receiver registered dynamically (UID check: shell/root only)");
-        Log.i(TAG, "ConfigApplyReceiver registered dynamically - invisible to third-party apps");
+        Log.i(TAG, "ConfigApplyReceiver registered dynamically, action=" + ACTION_APPLY_CONFIG);
+        Log.i(TAG, "Dynamic receiver exported for shell/root broadcasts, permission=" + BROADCAST_PERMISSION);
     }
     
     @Override

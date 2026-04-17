@@ -25,6 +25,12 @@
         <activity
             android:name=".FileBrowserActivity"
             android:parentActivityName=".MainActivity" />
+
+        <receiver
+            android:name=".ConfigApplyReceiver"
+            android:enabled="true"
+            android:exported="true"
+            android:permission="android.permission.DUMP" />
     </application>
 
 </manifest>
